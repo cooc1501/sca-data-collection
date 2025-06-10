@@ -1,7 +1,4 @@
 [submodule "chipwhisperer-aes-batch"]
-	path = chipwhisperer-aes-batch
-	url = https://github.com/cooc1501/chipwhisperer-aes-batch.git
-
-[submodule "chipwhisperer"]
 	path = chipwhisperer
 	url = https://github.com/cooc1501/chipwhisperer-aes-batch.git
+
