@@ -2,7 +2,11 @@
 A script to simplify the collection of SCA datasets with the chipwhisperer nano. Utilizes a patched versoin of the chipwhisperer simple serial AES implementation to increase data collection rate.
 
 ## Installation
-Clone this reposit
+Clone this repository and initialize submodules
+```
+git clone https://github.com/cooc1501/sca-data-collection.git
+git submodule update --init
+```
 
 Create a python virutal environment
 ```
@@ -14,7 +18,4 @@ Install Dependencies
 pip install -r requirements.txt
 ```
 
-Clone chipwhisperer repo to the root directory of this repo
-```
-
-```
+## Usage
