@@ -1,7 +1,9 @@
-# SCA Suite
-A collection of scripts and tools to accelerate the process of collecting side channel datasets with chipwhisperer devices.
+# Dataset Collection Suite
+A script to simplify the collection of SCA datasets with the chipwhisperer nano. Utilizes a patched versoin of the chipwhisperer simple serial AES implementation to increase data collection rate.
 
 ## Installation
+Clone this reposit
+
 Create a python virutal environment
 ```
 python -m venv ./.venv && . .venv/bin/activate
