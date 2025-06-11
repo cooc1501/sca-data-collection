@@ -5,6 +5,7 @@ import subprocess
 import chipwhisperer as cw
 import numpy as np
 from tqdm import tqdm
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from dataset import Dataset
 
@@ -94,10 +95,41 @@ def collect(scope, target, id: str, n: int):
     dset.save()
 
 def _gen_dataset_tvla(n: int, seed: int = 42):
-    ...
+
+    n = int(np.ceil(n/3))
+    
+    rand = np.random.default_rng(seed=seed)
+    k1 = np.asarray(bytearray(0x0123456789abcdef123456789abcdef0.to_bytes(16)), dtype=np.uint8).T
+    k2 = k1
+    pt1 = np.asarray(bytearray(0x00000000000000000000000000000000.to_bytes(16)), dtype=np.uint8).T
+    pt2 = np.asarray(bytearray(0xda39a3ee5e6b4b0d3255bfef95601890.to_bytes(16)), dtype=np.uint8).T
+
+    aes = Cipher(algorithms.AES128(bytearray(k1)), mode=modes.ECB())
+    enc = aes.encryptor()
+
+    d1k = np.broadcast_to(np.asarray(k1[:, None], dtype=np.uint8), (16, 2*n))
+    d1pt = np.empty((16, 2*n), dtype=np.uint8)
+    d2k = np.broadcast_to(np.asarray(k2[:, None], dtype=np.uint8), (16, n))
+    d2pt = np.broadcast_to(np.asarray(pt2[:, None], dtype=np.uint8), (16, n))
+
+    d1pt[..., 0] = pt1
+    for i in range(1, d1pt.shape[1]):
+        d1pt[..., i] = np.asarray(bytearray(enc.update(bytearray(d1pt[..., i-1])))).T
+
+    # Shuffle dataset
+    dk = np.hstack([d1k, d2k])
+    dpt = np.hstack([d1pt, d2pt])
+    shuffle_idx = rand.permutation(dk.shape[1])
+    dk = dk[..., shuffle_idx]
+    dpt = dpt[..., shuffle_idx]
+
+    return dk, dpt, shuffle_idx
 
 def _gen_dataset_random(n: int, seed: int = 21):
-    ...
+    rand = np.random.default_rng(seed=seed)
+    keys = rand.integers(low=0, high=256, size=(16, n), dtype=np.uint8)
+    texts = rand.integers(low=0, high=256, size=(16, n), dtype=np.uint8)
+    return keys, texts
 
 # Ok I actually think this is going to work. I just need to decide what datasets I want
 # collected. I'll generate some (or make some deterministic functions to generate them)
@@ -112,8 +144,19 @@ def main():
 
     # Connect to device
     # scope = connect()
-    scope, target = connect_husky()
-    collect(scope, target, args.id, args.n_traces)
+    dk, dpt, shuffle_idx = _gen_dataset_tvla(50000)
+    dk2, dpt2, shuffle_idx2 = _gen_dataset_tvla(50000)
+    assert((dk == dk2).all(), "dataset non-deterministic")
+    assert((dpt == dpt2).all(), "dataset non-deterministic")
+    assert((shuffle_idx == shuffle_idx2).all(), "dataset non-deterministic")
+
+    dk, dpt = _gen_dataset_random(50000)
+    dk2, dpt2 = _gen_dataset_random(50000)
+    assert((dk == dk2).all(), "dataset non-deterministic")
+    assert((dpt == dpt2).all(), "dataset non-deterministic")
+
+    # scope, target = connect_husky()
+    # collect(scope, target, args.id, args.n_traces)
 
 if __name__ == "__main__":
     main()
