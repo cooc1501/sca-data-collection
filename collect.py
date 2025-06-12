@@ -69,7 +69,6 @@ def collect(scope, target, keys: np.ndarray, texts: np.ndarray, id: str, n: int)
     pt = np.zeros((16, keys.shape[1]), dtype=np.uint8)
     
     # Collect data
-    # TODO: This only works correctly when the number of traces is divisible by 4
     scope.arm()
     for i in tqdm(range(0, keys.shape[1], 4), desc="capturing traces", unit_scale=4):
         write = bytearray().join([bytearray(keys[..., i+j]) + bytearray(texts[..., i+j]) for j in range(min(4, keys.shape[1]-i))])
@@ -120,10 +119,6 @@ def _gen_dataset_random(n: int, seed: int = 21):
     keys = rand.integers(low=0, high=256, size=(16, n), dtype=np.uint8)
     texts = rand.integers(low=0, high=256, size=(16, n), dtype=np.uint8)
     return keys, texts
-
-# Ok I actually think this is going to work. I just need to decide what datasets I want
-# collected. I'll generate some (or make some deterministic functions to generate them)
-# and include them in the repository.
 
 def main():
 
