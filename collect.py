@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from dataset import Dataset
 
 # We don't have a CW-Nano to test on, any connection errors likely originate here
-def connect():
+def connect_nano(aes_delay: int = 1e4):
     SCOPETYPE = 'CWNANO'
     PLATFORM = 'CWNANO'
     CRYPTO_TARGET = 'TINYAES128C'
@@ -30,12 +30,12 @@ def connect():
 
     # Build and Flash firmware
     firmware_dir = os.path.join(os.path.dirname(__file__), 'chipwhisperer/firmware/mcu/simpleserial-aes-batch')
-    ret = subprocess.run(["make", f"PLATFORM={PLATFORM}", f"CRYPTO_TARGET={CRYPTO_TARGET}", f"SS_VER={SS_VER}"], cwd=firmware_dir)
+    ret = subprocess.run(["make", f"EXTRA_OPTS=DELAY={aes_delay}", f"PLATFORM={PLATFORM}", f"CRYPTO_TARGET={CRYPTO_TARGET}", f"SS_VER={SS_VER}"], cwd=firmware_dir)
     cw.program_target(scope, prog, os.path.join(firmware_dir, "simpleserial-aes-batch-CWNANO.hex"))
     
     return scope, target
 
-def _connect_husky():
+def _connect_husky(aes_delay: int = 1e4):
     SCOPETYPE = 'OPENADC'
     PLATFORM = 'CWHUSKY'
     CRYPTO_TARGET = 'TINYAES128C'
@@ -55,12 +55,11 @@ def _connect_husky():
 
     # Build and Flash firmware
     firmware_dir = os.path.join(os.path.dirname(__file__), 'chipwhisperer/firmware/mcu/simpleserial-aes-batch')
-    ret = subprocess.run(["make", f"PLATFORM={PLATFORM}", f"CRYPTO_TARGET={CRYPTO_TARGET}", f"SS_VER={SS_VER}"], cwd=firmware_dir)
+    ret = subprocess.run(["make", f"EXTRA_OPTS=DELAY={aes_delay}", f"PLATFORM={PLATFORM}", f"CRYPTO_TARGET={CRYPTO_TARGET}", f"SS_VER={SS_VER}"], cwd=firmware_dir)
     cw.program_target(scope, prog, os.path.join(firmware_dir, f"simpleserial-aes-batch-{PLATFORM}.hex"))
 
     return scope, target
 
-# If I'm saving the dataset from this function I need to pass it dataset metadata to record
 def collect(scope, target, keys: np.ndarray, texts: np.ndarray, id: str, n: int):
 
     # Initialize output arrays
@@ -68,19 +67,35 @@ def collect(scope, target, keys: np.ndarray, texts: np.ndarray, id: str, n: int)
     k = np.zeros((16, keys.shape[1]), dtype=np.uint8)
     pt = np.zeros((16, keys.shape[1]), dtype=np.uint8)
     
-    # Collect data
-    scope.arm()
-    for i in tqdm(range(0, keys.shape[1], 4), desc="capturing traces", unit_scale=4):
+    # warmup
+    for i in tqdm(range(0, 4*20, 4), desc="warming up", unit_scale=4):
+        if i == 0:
+            scope.arm()
         write = bytearray().join([bytearray(keys[..., i+j]) + bytearray(texts[..., i+j]) for j in range(min(4, keys.shape[1]-i))])
-        target.send_cmd(0x02, 0x00, write)
         for j in range(min(4, keys.shape[1]-i)):
             scope.capture()
-            tmp = scope.get_last_trace(as_int=True)
+            if j == 0:
+                target.send_cmd(0x02, 0x00, write)
+
             scope.arm()
+            tmp = scope.get_last_trace(as_int=True)
+
+    # Collect data
+    for i in tqdm(range(0, keys.shape[1], 4), desc="capturing traces", unit_scale=4):
+        if i == 0:
+            scope.arm()
+        write = bytearray().join([bytearray(keys[..., i+j]) + bytearray(texts[..., i+j]) for j in range(min(4, keys.shape[1]-i))])
+        for j in range(min(4, keys.shape[1]-i)):
+            scope.capture()
+            if j == 0:
+                target.send_cmd(0x02, 0x00, write)
+
+            scope.arm()
+            tmp = scope.get_last_trace(as_int=True)
             t[..., i+j] = tmp
             k[..., i+j] = keys[..., i+j]
             pt[..., i+j] = texts[..., i+j]
-
+        
     return t, k, pt
 
 def _gen_dataset_tvla(n: int, seed: int = 42):
@@ -128,14 +143,14 @@ def main():
     parser.add_argument('-d', '--device-id', type=str, required=True, dest='id')
     parser.add_argument('-t', '--type', type=str, required=True, dest='type', choices=list(dataset_funcs.keys()))
     parser.add_argument('-n', '--n-traces', type=int, required=False, default=50000, dest='n_traces')
+    parser.add_argument('--delay', type=int, required=False, default=1e4, dest='delay')
 
     args = parser.parse_args()
     args.n_traces = args.n_traces + (args.n_traces % 4)
-    print(args.n_traces)
 
     # Connect to device
-    # scope, target = connect()
-    scope, target = _connect_husky()
+    scope, target = connect(args.delay)
+    # scope, target = _connect_husky(args.delay)
     
     # Generate dataset
     print(f"generating {args.type} dataset...\n")
