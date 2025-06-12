@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from dataset import Dataset
 
-
+# We don't have a CW-Nano to test on, any connection errors likely originate here
 def connect():
     SCOPETYPE = 'CWNANO'
     PLATFORM = 'CWNANO'
@@ -35,7 +35,7 @@ def connect():
     
     return scope, target
 
-def connect_husky():
+def _connect_husky():
     SCOPETYPE = 'OPENADC'
     PLATFORM = 'CWHUSKY'
     CRYPTO_TARGET = 'TINYAES128C'
@@ -60,39 +60,29 @@ def connect_husky():
 
     return scope, target
 
-def collect(scope, target, id: str, n: int):
-    # Should each device use the same keys and plaintexts? probably
-    keys = [bytearray(os.urandom(16)) for _ in range(n)]
-    plaintexts = [bytearray(os.urandom(16)) for _ in range(n)]
+# If I'm saving the dataset from this function I need to pass it dataset metadata to record
+def collect(scope, target, keys: np.ndarray, texts: np.ndarray, id: str, n: int):
 
     # Initialize output arrays
-    t = np.empty((len(keys), scope.adc.samples), dtype=np.uint16)  # TODO: make this uint8 for nano
-    k = np.empty((len(keys), 16), dtype=np.uint8)
-    pt = np.empty((len(keys), 16), dtype=np.uint8)
+    t = np.zeros((scope.adc.samples, keys.shape[1]), dtype=np.uint16)  # TODO: make this uint8 for nano
+    k = np.zeros((16, keys.shape[1]), dtype=np.uint8)
+    pt = np.zeros((16, keys.shape[1]), dtype=np.uint8)
     
     # Collect data
-    for i in tqdm(range(0, n, 4), desc="capturing", unit_scale=4):
-        scope.arm()
-        write = keys[i] + plaintexts[i] + keys[i+1] + plaintexts[i+1] + keys[i+2] + plaintexts[i+2] + keys[i+3] + plaintexts[i+3]
+    # TODO: This only works correctly when the number of traces is divisible by 4
+    scope.arm()
+    for i in tqdm(range(0, keys.shape[1], 4), desc="capturing traces", unit_scale=4):
+        write = bytearray().join([bytearray(keys[..., i+j]) + bytearray(texts[..., i+j]) for j in range(min(4, keys.shape[1]-i))])
         target.send_cmd(0x02, 0x00, write)
-        for j in range(4):
+        for j in range(min(4, keys.shape[1]-i)):
             scope.capture()
             tmp = scope.get_last_trace(as_int=True)
-            t[i+j] = tmp
-            k[i+j] = keys[i+j]
-            pt[i+j] = plaintexts[i+j]
+            scope.arm()
+            t[..., i+j] = tmp
+            k[..., i+j] = keys[..., i+j]
+            pt[..., i+j] = texts[..., i+j]
 
-    # Export formatted dataset
-    dset = Dataset.from_data(
-        path=f"Device {id} {n} Traces",
-        traces=t, texts=pt, keys=k, metadata={
-            'name' : f"Device {id} dataset. {n} traces.",
-            'scope' : "ChipWhisperer Nano",
-            'DUT' : "STM32F0",
-            'device_id' : id
-        }
-    )
-    dset.save()
+    return t, k, pt
 
 def _gen_dataset_tvla(n: int, seed: int = 42):
 
@@ -123,7 +113,7 @@ def _gen_dataset_tvla(n: int, seed: int = 42):
     dk = dk[..., shuffle_idx]
     dpt = dpt[..., shuffle_idx]
 
-    return dk, dpt, shuffle_idx
+    return dk, dpt
 
 def _gen_dataset_random(n: int, seed: int = 21):
     rand = np.random.default_rng(seed=seed)
@@ -136,27 +126,40 @@ def _gen_dataset_random(n: int, seed: int = 21):
 # and include them in the repository.
 
 def main():
+
+    dataset_funcs = {'random' : _gen_dataset_random, 'tvla' : _gen_dataset_tvla}
+
     parser = ArgumentParser('SCA Portability Dataset Collection')
     parser.add_argument('-d', '--device-id', type=str, required=True, dest='id')
+    parser.add_argument('-t', '--type', type=str, required=True, dest='type', choices=list(dataset_funcs.keys()))
     parser.add_argument('-n', '--n-traces', type=int, required=False, default=50000, dest='n_traces')
-    
+
     args = parser.parse_args()
+    args.n_traces = args.n_traces + (args.n_traces % 4)
+    print(args.n_traces)
 
     # Connect to device
-    # scope = connect()
-    dk, dpt, shuffle_idx = _gen_dataset_tvla(50000)
-    dk2, dpt2, shuffle_idx2 = _gen_dataset_tvla(50000)
-    assert((dk == dk2).all(), "dataset non-deterministic")
-    assert((dpt == dpt2).all(), "dataset non-deterministic")
-    assert((shuffle_idx == shuffle_idx2).all(), "dataset non-deterministic")
+    # scope, target = connect()
+    scope, target = _connect_husky()
+    
+    # Generate dataset
+    print(f"generating {args.type} dataset...\n")
+    dk, dpt = dataset_funcs[args.type](args.n_traces)
+    
+    t, k, pt = collect(scope, target, dk, dpt, args.id, args.n_traces)
+    # Export formatted dataset
+    dset = Dataset.from_data(
+        path=f"Device {args.id} {t.shape[1]} {args.type} Traces",
+        traces=t, texts=pt, keys=k, metadata={
+            'name' : f"Device {args.id} dataset. {t.shape[1]} {args.type} traces.",
+            'scope' : "ChipWhisperer Nano",
+            'DUT' : "STM32F0",
+            'device_id' : args.id
+        }
+    )
+    dset.save()
 
-    dk, dpt = _gen_dataset_random(50000)
-    dk2, dpt2 = _gen_dataset_random(50000)
-    assert((dk == dk2).all(), "dataset non-deterministic")
-    assert((dpt == dpt2).all(), "dataset non-deterministic")
-
-    # scope, target = connect_husky()
-    # collect(scope, target, args.id, args.n_traces)
+    print(f"exported dataset to {os.path.abspath(dset._path)}")
 
 if __name__ == "__main__":
     main()
