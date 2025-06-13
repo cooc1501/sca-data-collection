@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from dataset import Dataset
 
 # We don't have a CW-Nano to test on, any connection errors likely originate here
-def connect_nano(aes_delay: int = 1e4):
+def connect_nano(aes_delay: int = 1e4) -> tuple[cw.scope, cw.target]:
     SCOPETYPE = 'CWNANO'
     PLATFORM = 'CWNANO'
     CRYPTO_TARGET = 'TINYAES128C'
@@ -35,7 +35,7 @@ def connect_nano(aes_delay: int = 1e4):
     
     return scope, target
 
-def _connect_husky(aes_delay: int = 1e4):
+def _connect_husky(aes_delay: int = 1e4) -> tuple[cw.scope, cw.target]:
     SCOPETYPE = 'OPENADC'
     PLATFORM = 'CWHUSKY'
     CRYPTO_TARGET = 'TINYAES128C'
@@ -60,10 +60,11 @@ def _connect_husky(aes_delay: int = 1e4):
 
     return scope, target
 
-def collect(scope, target, keys: np.ndarray, texts: np.ndarray, id: str, n: int):
+def collect(scope: cw.scope, target: cw.target, keys: np.ndarray, texts: np.ndarray, id: str, n: int):
 
     # Initialize output arrays
-    t = np.zeros((scope.adc.samples, keys.shape[1]), dtype=np.uint16)  # TODO: make this uint8 for nano
+    trace_type = np.uint8 if scope.adc.bits_per_sample <= 8 else np.uint16
+    t = np.zeros((scope.adc.samples, keys.shape[1]), dtype=trace_type)
     k = np.zeros((16, keys.shape[1]), dtype=np.uint8)
     pt = np.zeros((16, keys.shape[1]), dtype=np.uint8)
     
@@ -148,16 +149,19 @@ def main():
     args = parser.parse_args()
     args.n_traces = args.n_traces + (args.n_traces % 4)
 
-    # Connect to device
-    scope, target = connect(args.delay)
+    # connect to device
+    scope, target = connect_nano(args.delay)
     # scope, target = _connect_husky(args.delay)
+    scope.adc.bits_per_sample
     
-    # Generate dataset
+    # generate dataset
     print(f"generating {args.type} dataset...\n")
     dk, dpt = dataset_funcs[args.type](args.n_traces)
     
+    # collect dataset
     t, k, pt = collect(scope, target, dk, dpt, args.id, args.n_traces)
-    # Export formatted dataset
+    
+    # export formatted dataset
     dset = Dataset.from_data(
         path=f"Device {args.id} {t.shape[1]} {args.type} Traces",
         traces=t, texts=pt, keys=k, metadata={
