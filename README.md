@@ -1,5 +1,5 @@
 # Dataset Collection Suite
-A script to simplify the collection of SCA datasets with the chipwhisperer nano. Utilizes a patched versoin of the chipwhisperer simple serial AES implementation to increase data collection rate.
+A script to simplify the collection of SCA datasets with the chipwhisperer nano. Utilizes a patched version of the chipwhisperer simple serial AES implementation to increase data collection rate.
 
 ## Installation
 Clone this repository and initialize submodules
